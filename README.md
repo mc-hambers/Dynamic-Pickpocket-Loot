@@ -1,6 +1,12 @@
 # Dynamic Pickpocket Loot
 
-Skyrim SE/AE mod — source version **1.1.2**.
+Skyrim SE/AE mod — source version **1.1.3**.
+
+## 1.1.3 changes
+
+Skips valuation for ignored pocket items, removes unnecessary native-list price calculations, and uses unenchanted record values for equipment restoration. Material keywords resolve by vanilla record identity. Crossbows can use suitable plain low-tier alternatives from the NPC's own lists. Existing save state is preserved.
+
+Build, 65,788 core checks, loader/metadata and archive validation pass. The reported crash has not been reproduced; live Crossbow Integration testing remains pending.
 
 ## Complete source
 
