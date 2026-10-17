@@ -47,6 +47,10 @@ inline bool canGenerateAs(const InventoryItemFacts& item,Category category) {
     default: return false;
     }
 }
+inline bool needsPocketValue(const InventoryItemFacts& item) {
+    const auto category=pocketCategory(item);
+    return !item.gold && !item.quest && (category==Category::Jewelry || category==Category::Gem);
+}
 // Clamp represented extra-data stacks to the actual inventory count. A custom
 // enchantment on one ring must not raise the value of every plain ring sharing it.
 class JewelryValueAccumulator {

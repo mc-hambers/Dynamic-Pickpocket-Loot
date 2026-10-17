@@ -15,6 +15,12 @@ class Adapter {
     RE::BGSKeyword* hammer=nullptr;
     RE::BGSKeyword* richClothing=nullptr;
     RE::TESFaction* streetVendors=nullptr;
+    // Replacement prices use record values, without enchantment/tempering or
+    // inventory valuation callbacks on third-party equipment.
+    static int recordValue(RE::TESBoundObject* item) {
+        const auto* value=skyrim_cast<const RE::TESValueForm*>(item);
+        return value ? std::max(0,value->value) : 0;
+    }
     void equipNow(RE::Actor* actor,RE::TESBoundObject* item) const {
         // The inventory owns instance extra data after AddObjectToContainer. Never reuse the
         // supplied raw pointer here, resolve the current engine-owned inventory data instead.
@@ -35,7 +41,7 @@ class Adapter {
         }
     }
     Material material(RE::TESObjectWEAP* w) const {for (const auto& [keyword,m]:materials) if (w->HasKeyword(keyword)) return m;return Material::Other;}
-    bool elf(RE::Actor* actor) const {const auto id=actor->GetRace()->GetFormID();return id==0x13742 || id==0x13743 || id==0x13749 || id==0x8883D || id==0x88840 || id==0x88884;}
+    bool elf(RE::Actor* actor) const {const auto* race=actor->GetRace();if (!race) return false;const auto id=race->GetFormID();return id==0x13742 || id==0x13743 || id==0x13749 || id==0x8883D || id==0x88840 || id==0x88884;}
     void collect(RE::TESForm* f,unsigned level,std::vector<RE::TESBoundObject*>& out,std::set<unsigned>& path,unsigned depth,unsigned& nodes) const {
         if (!f || depth>16 || ++nodes>4096 || f->IsDeleted()) return;
         if (auto* list=f->As<RE::TESLevItem>()) {
@@ -61,9 +67,13 @@ class Adapter {
             const auto& e=list->entries[i];if (!e.form || !e.count || e.level>level || (!allLevels && e.level!=highest)) continue;
             std::vector<RE::TESBoundObject*> branch;collectNative(e.form,level,carried,branch,path,depth+1,nodes);if (branch.empty()) continue;
             bool present=std::any_of(branch.begin(),branch.end(),[&](auto* o) {return carried.contains(o->GetFormID());});
-            int value=(*std::min_element(branch.begin(),branch.end(),[](auto* a,auto* b) {return a->GetGoldValue()<b->GetGoldValue();}))->GetGoldValue();
-            options.push_back(std::move(branch));facts.push_back({present,value});
+            options.push_back(std::move(branch));facts.push_back({present,0});
         }
+        if (nativePricesNeeded(facts,all,list->GetChanceNone()==0))
+            for (std::size_t i=0;i<options.size();++i) {
+                const auto& branch=options[i];
+                facts[i].value=recordValue(*std::min_element(branch.begin(),branch.end(),[](auto* a,auto* b) {return recordValue(a)<recordValue(b);}));
+            }
         for (auto i:nativeBranches(facts,all,list->GetChanceNone()==0)) out.insert(out.end(),options[i].begin(),options[i].end());
         path.erase(form->GetFormID());
     }
@@ -95,7 +105,7 @@ class Adapter {
         for (auto& [o,e]:inv) {
             auto* a=o ? o->As<RE::TESObjectARMO>() : nullptr;
             if (!a || !usable(a) || e.first<=0 || (clothingOnly && !a->IsClothing()) || !(mask(a)&slot) || (mask(a)&occupied)) continue;
-            if (!best || (!a->IsClothing() && best->IsClothing()) || (a->IsClothing()==best->IsClothing() && a->GetGoldValue()<best->GetGoldValue())) {
+            if (!best || (!a->IsClothing() && best->IsClothing()) || (a->IsClothing()==best->IsClothing() && recordValue(a)<recordValue(best))) {
                 best=a;
             }
         }
@@ -119,8 +129,8 @@ class Adapter {
         if (base->defaultOutfit) base->defaultOutfit->ForEachItem([&](RE::TESForm* form) {collect(form,actor->GetLevel(),candidates,path,0,nodes);return RE::BSContainer::ForEachResult::kContinue;});
         RE::TESObjectARMO* best=nullptr;
         for (auto* object:candidates) if (auto* a=object->As<RE::TESObjectARMO>();a && usable(a) && a->IsClothing() && !a->formEnchanting && (mask(a)&slot) && !(mask(a)&occupied) && !(mask(a)&((slots[0]|slots[1]|slots[2]|slots[3])&~slot))) {
-            if (!cheapNativeClothing(a->GetGoldValue(),slot==slots[1],richClothing && a->HasKeyword(richClothing))) continue;
-            if (!best || a->GetGoldValue()<best->GetGoldValue() || (a->GetGoldValue()==best->GetGoldValue() && a->GetFormID()<best->GetFormID())) best=a;
+            if (!cheapNativeClothing(recordValue(a),slot==slots[1],richClothing && a->HasKeyword(richClothing))) continue;
+            if (!best || recordValue(a)<recordValue(best) || (recordValue(a)==recordValue(best) && a->GetFormID()<best->GetFormID())) best=a;
         }
         return best;
     }
@@ -133,7 +143,7 @@ class Adapter {
         for (unsigned pass=0;pass<2;++pass) {
             RE::TESObjectARMO* best=nullptr;
             for (const auto& b:bindings) if (b.kind==0 && b.group==(pass==0 ? group : 1)) if (auto* a=b.object->As<RE::TESObjectARMO>();a && (mask(a)&slot) && !(mask(a)&occupied) && !a->formEnchanting && simpleSlot(a)) {
-                if (!best || mask(a)<mask(best) || (mask(a)==mask(best) && a->GetGoldValue()<best->GetGoldValue())) best=a;
+                if (!best || mask(a)<mask(best) || (mask(a)==mask(best) && recordValue(a)<recordValue(best))) best=a;
             }
             if (best) return best;
         }return nullptr;
@@ -145,18 +155,34 @@ class Adapter {
     RE::TESObjectARMO* armor(RE::Actor* actor,RE::TESObjectARMO* original,unsigned slot,unsigned occupied,Wealth wealth,bool guard) const {
         if (guardUniform(original,guard) && !(mask(original)&occupied)) return original;
         RE::TESObjectARMO* best=nullptr;const bool elven=elf(actor) && wealth>=Wealth::Comfortable;
-        for (const auto& b:bindings) if (b.kind==1) if (auto* a=b.object->As<RE::TESObjectARMO>();a && !a->formEnchanting && a->GetArmorType()==original->GetArmorType() && (mask(a)&slot) && !(mask(a)&occupied) && a->GetGoldValue()<=original->GetGoldValue() && a->armorRating<=original->armorRating) {
+        for (const auto& b:bindings) if (b.kind==1) if (auto* a=b.object->As<RE::TESObjectARMO>();a && !a->formEnchanting && a->GetArmorType()==original->GetArmorType() && (mask(a)&slot) && !(mask(a)&occupied) && recordValue(a)<=recordValue(original) && a->armorRating<=original->armorRating) {
             bool preferred=a->IsLightArmor() ? b.editor.find(elven ? "Elven" : "Leather")!=std::string::npos : b.editor.find(wealth<=Wealth::Poor ? "Iron" : "Steel")!=std::string::npos;
             auto rank=[&](RE::TESObjectARMO* candidate) {for (const auto& entry:bindings) if (entry.object==candidate) return entry.editor.find(candidate->IsLightArmor() ? (elven ? "Elven" : "Leather") : (wealth<=Wealth::Poor ? "Iron" : "Steel"))!=std::string::npos;return false;};
             if (!best || (preferred && !rank(best)) || (preferred==rank(best) && a->armorRating>best->armorRating)) best=a;
         }return best;
     }
     RE::TESObjectWEAP* weapon(RE::Actor* actor,RE::TESObjectWEAP* original,unsigned kind,Wealth wealth) const {
+        // Crossbow overhauls may make the vanilla Dawnguard fallback stronger
+        // than a common steel crossbow. Consider plain low-tier crossbows from
+        // this NPC's own native lists as well, never arbitrary global weapons.
+        std::vector<RE::TESBoundObject*> native;
+        if (kind==8) {
+            std::set<unsigned> path;unsigned nodes=0;auto* base=actor->GetActorBase();
+            if (base) {
+                base->ForEachContainerObject([&](RE::ContainerObject& e) {if (e.count>0) collect(e.obj,actor->GetLevel(),native,path,0,nodes);return RE::BSContainer::ForEachResult::kContinue;});
+                if (base->defaultOutfit) base->defaultOutfit->ForEachItem([&](RE::TESForm* f) {collect(f,actor->GetLevel(),native,path,0,nodes);return RE::BSContainer::ForEachResult::kContinue;});
+            }
+        }
         auto target=replacementMaterial(material(original),elf(actor),wealth>=Wealth::Wealthy);
         unsigned group=target==Material::Elven ? 1 : target==Material::Iron ? 2 : 0;
         for (unsigned pass=0;pass<3;++pass) {
             RE::TESObjectWEAP* best=nullptr;const unsigned wanted=pass==0 ? group : pass==1 ? 0 : 2;
-            for (const auto& b:bindings) if (b.kind==2 && b.group==wanted) if (auto* w=b.object->As<RE::TESObjectWEAP>();w && weaponKind(w)==int(kind) && !w->formEnchanting && plainReplacementAllowed(original->GetGoldValue(),original->attackDamage,w->GetGoldValue(),w->attackDamage)) if (!best || w->attackDamage>best->attackDamage || (w->attackDamage==best->attackDamage && w->GetGoldValue()<best->GetGoldValue())) best=w;
+            for (const auto& b:bindings) if (b.kind==2 && b.group==wanted) if (auto* w=b.object->As<RE::TESObjectWEAP>();w && weaponKind(w)==int(kind) && !w->formEnchanting && plainReplacementAllowed(recordValue(original),original->attackDamage,recordValue(w),w->attackDamage)) if (!best || w->attackDamage>best->attackDamage || (w->attackDamage==best->attackDamage && recordValue(w)<recordValue(best))) best=w;
+            for (auto* object:native) if (auto* w=object->As<RE::TESObjectWEAP>();w && weaponKind(w)==int(kind) && !w->formEnchanting) {
+                const auto mat=material(w);
+                if (nativeCrossbowAllowed(mat,wanted,w->formEnchanting!=nullptr,recordValue(original),original->attackDamage,recordValue(w),w->attackDamage))
+                    if (!best || w->attackDamage>best->attackDamage || (w->attackDamage==best->attackDamage && recordValue(w)<recordValue(best))) best=w;
+            }
             if (best) return best;
         }return nullptr;
     }
@@ -165,12 +191,15 @@ public:
         auto* h=RE::TESDataHandler::GetSingleton();
         streetVendors=h->LookupForm<RE::TESFaction>(0x7F6BE,"Skyrim.esm");
         for (const auto& spec:forms) if (auto* f=h->LookupForm(spec.form,spec.plugin)) if (auto* o=f->As<RE::TESBoundObject>();usable(o)) bindings.push_back({o,spec.kind,spec.group,spec.editor});
-        for (auto* k:h->GetFormArray<RE::BGSKeyword>()) if (k) {
-            const std::string_view name=k->GetFormEditorID();
-            if (name=="WeapTypeWarhammer") hammer=k;
-            if (name=="ClothingRich") richClothing=k;
-            for (auto [text,mat]:std::initializer_list<std::pair<std::string_view,Material>>{{"WeapMaterialIron",Material::Iron},{"WeapMaterialSteel",Material::Steel},{"WeapMaterialElven",Material::Elven},{"WeapMaterialGlass",Material::Glass},{"WeapMaterialEbony",Material::Ebony},{"WeapMaterialDaedric",Material::Daedric},{"DLC2WeaponMaterialDragonbone",Material::Dragonbone},{"WeapMaterialDragonbone",Material::Dragonbone},{"WeapMaterialDwarven",Material::Dwarven}}) if (name==text) materials.emplace_back(k,mat);
-        }
+        hammer=h->LookupForm<RE::BGSKeyword>(0x6D930,"Skyrim.esm");
+        richClothing=h->LookupForm<RE::BGSKeyword>(0xA865D,"Skyrim.esm");
+        // Resolve stable record identities; duplicate/missing editor IDs in other
+        // plugins must not replace vanilla material keys or require global scans.
+        for (const auto& [id,mat]:std::initializer_list<std::pair<unsigned,Material>>{
+            {0x1E718,Material::Iron},{0x1E719,Material::Steel},{0x1E71A,Material::Dwarven},
+            {0x1E71B,Material::Elven},{0x1E71D,Material::Glass},{0x1E71E,Material::Ebony},{0x1E71F,Material::Daedric}})
+            if (auto* key=h->LookupForm<RE::BGSKeyword>(id,"Skyrim.esm")) materials.emplace_back(key,mat);
+        if (auto* key=h->LookupForm<RE::BGSKeyword>(0x19822,"Dawnguard.esm")) materials.emplace_back(key,Material::Dragonbone);
         SKSE::log::info("Equipment restoration loaded {} vanilla bindings, {} weapon materials; ExtraDataList facade={} bytes, allocation={} bytes",bindings.size(),materials.size(),sizeof(RE::ExtraDataList),extraDataCapacity(sizeof(RE::ExtraDataList)));
     }
     void baseline(RE::Actor* actor,State& s) const {
@@ -215,15 +244,15 @@ public:
             const bool armorEnabled=armorSlot(i,!source->IsClothing());
             if (!clothingSlot && !armorEnabled) {c.armorDue=-1;continue;}
             const bool uniform=guardUniform(source,guard);
-            if (!clothingSlot && armorEnabled && (empty || (clothingMask&slots[i]))) armOnce(c.armorDue,now,equipmentArmorDays(source->GetGoldValue(),guard));
+            if (!clothingSlot && armorEnabled && (empty || (clothingMask&slots[i]))) armOnce(c.armorDue,now,equipmentArmorDays(recordValue(source),guard));
             if (guard && source && !source->IsClothing()) {
-                if (empty || (clothingMask&slots[i])) {bool started=c.armorDue<0;armOnce(c.armorDue,now,equipmentArmorDays(source->GetGoldValue(),true));if (started) SKSE::log::info("Guard armor missing on {:08X}, slot {}: twelve-hour replacement due {}",actor->GetFormID(),i,c.armorDue);}
+                if (empty || (clothingMask&slots[i])) {bool started=c.armorDue<0;armOnce(c.armorDue,now,equipmentArmorDays(recordValue(source),true));if (started) SKSE::log::info("Guard armor missing on {:08X}, slot {}: twelve-hour replacement due {}",actor->GetFormID(),i,c.armorDue);}
                 shortenGuardDeadline(c.armorDue,now);
             }
             if (uniform) c.due=-1;
             if (clothingSlot && !uniform && empty && !(ownedMask&slots[i]) && !c.temporary) {bool started=c.due<0;armOnce(c.due,now,clothingDays(poor || saved.role==Role::Beggar));if (started) SKSE::log::info("Clothing missing on {:08X}, slot {}: due {}",actor->GetFormID(),i,c.due);}
             if (!empty) c.due=-1;
-            if ((clothingMask&slots[i]) && c.armorDue<0 && source && !source->IsClothing()) c.armorDue=now+equipmentArmorDays(source->GetGoldValue(),guard);
+            if ((clothingMask&slots[i]) && c.armorDue<0 && source && !source->IsClothing()) c.armorDue=now+equipmentArmorDays(recordValue(source),guard);
         }
         for (unsigned kind=0;kind<weaponKinds;++kind) if (s.weapons[kind].source) {auto& c=s.weapons[kind];if (!weapons || (weaponMask&(1u<<kind))) c.due=-1;else {bool started=c.due<0;armOnce(c.due,now,1);if (started) SKSE::log::info("Weapon missing on {:08X}, kind {}: due {}",actor->GetFormID(),kind,c.due);}}
         bool work=false;
@@ -252,7 +281,7 @@ public:
                         if (!extra) {SKSE::log::error("Temporary clothing allocation failed; restoration remains pending");continue;}
                         extra->Add(new RE::ExtraUniqueID(actor->GetFormID(),uid));
                         c.temporary=item->GetFormID();c.extraBase=actor->GetFormID();c.extraUID=uid;c.due=-1;
-                        if (!source->IsClothing() && c.armorDue<0) c.armorDue=now+equipmentArmorDays(source->GetGoldValue(),guard);
+                        if (!source->IsClothing() && c.armorDue<0) c.armorDue=now+equipmentArmorDays(recordValue(source),guard);
                         SKSE::log::info("Temporary clothing inventory add begin {:08X} item {:08X}",actor->GetFormID(),item->GetFormID());
                         actor->AddObjectToContainer(item,extra,1,nullptr);
                         SKSE::log::info("Temporary clothing inventory add returned {:08X} item {:08X}",actor->GetFormID(),item->GetFormID());if (!allowed()) return;
@@ -265,7 +294,7 @@ public:
             if (!allowed()) return;
             // Wearing carried clothes also starts the armor waiting period, without tagging or deleting those clothes.
             if (!source->IsClothing() && c.armorDue<0) {
-                auto inv=actor->GetInventory();for (const auto& [o,e]:inv) if (o && e.first>0 && e.second && e.second->IsWorn()) if (auto* a=o->As<RE::TESObjectARMO>();a && a->IsClothing() && (mask(a)&slots[i])) c.armorDue=now+equipmentArmorDays(source->GetGoldValue(),guard);
+                auto inv=actor->GetInventory();for (const auto& [o,e]:inv) if (o && e.first>0 && e.second && e.second->IsWorn()) if (auto* a=o->As<RE::TESObjectARMO>();a && a->IsClothing() && (mask(a)&slots[i])) c.armorDue=now+equipmentArmorDays(recordValue(source),guard);
             }
             if (dueNow(c.armorDue,now)) {
                 auto inv=actor->GetInventory();bool armored=false;unsigned overlappingClothes=0;

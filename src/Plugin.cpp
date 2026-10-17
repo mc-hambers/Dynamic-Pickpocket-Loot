@@ -167,7 +167,6 @@ public:
     }
     InventoryItemFacts itemFacts(RE::TESBoundObject* item) const {
         InventoryItemFacts facts;
-        facts.baseValue=item->GetGoldValue();
         facts.gold=item==gold;
         if (auto it=poolCategories.find(item->GetFormID());it != poolCategories.end()) facts.knownCategory=it->second;
         auto keyword=[item](RE::BGSKeyword* k) { return k && item->HasKeywordInArray({k},false); };
@@ -246,6 +245,10 @@ public:
             auto facts=itemFacts(item);
             facts.count=data.first;
             facts.quest=data.second && data.second->IsQuestObject();
+            // Ignore weapons, outfits and other non-valuables before entering
+            // Skyrim's valuation code. Jewelry below retains enchantment pricing.
+            if (needsPocketValue(facts) && pocketCategory(facts)==Category::Gem)
+                facts.baseValue=item->GetGoldValue();
             if (!facts.quest && pocketCategory(facts)==Category::Jewelry) {
                 JewelryValueAccumulator value(facts.count);
                 if (data.second && data.second->extraLists) {
@@ -589,7 +592,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
         spdlog::set_level(spdlog::level::info);
         spdlog::flush_on(spdlog::level::info);
     }
-    logger::info("Dynamic Pickpocket Loot 1.1.2; runtime {}",REL::Module::get().version().string());
+    logger::info("Dynamic Pickpocket Loot 1.1.3; runtime {}",REL::Module::get().version().string());
     const auto version=REL::Module::get().version();
     const std::set<unsigned> aeBuilds{317,318,323,342,353,629,640,659,1130,1170,1179};
     const bool supported=version.major()==1 && ((version.minor()==5 && version.patch()==97) || (version.minor()==6 && aeBuilds.contains(version.patch())) || (version.minor()==7 && (version.patch()==99 || version.patch()==104)));

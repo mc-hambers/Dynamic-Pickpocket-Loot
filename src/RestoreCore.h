@@ -22,6 +22,10 @@ inline void applyClothingPolicy(State& state,bool poor,bool beggar) {
     for (unsigned i=0;i<state.wear.size();++i) if (!enabledSlot(i,poor,beggar)) state.wear[i].due=-1;
 }
 struct NativeBranch {bool present;int value;};
+inline bool nativePricesNeeded(const std::vector<NativeBranch>& branches,bool useAll,bool guaranteed) {
+    return guaranteed && !useAll && branches.size()>1 &&
+        std::none_of(branches.begin(),branches.end(),[](const auto& b) {return b.present;});
+}
 inline std::vector<unsigned> nativeBranches(const std::vector<NativeBranch>& branches,bool useAll,bool guaranteed) {
     std::vector<unsigned> chosen;
     const bool bundle=useAll && (guaranteed || std::any_of(branches.begin(),branches.end(),[](const auto& b) {return b.present;}));
@@ -50,6 +54,10 @@ inline Material replacementMaterial(Material original,bool elvenRace,bool wealth
 inline void armOnce(double& due,double now,double days) {if (due<0) due=now+days;}
 inline bool dueNow(double due,double now) {return due>=0 && now>=due;}
 inline bool plainReplacementAllowed(int originalValue,unsigned originalDamage,int value,unsigned damage) {return value<=originalValue && damage<=originalDamage;}
+inline bool nativeCrossbowAllowed(Material material,unsigned group,bool enchanted,int sourceValue,unsigned sourceDamage,int value,unsigned damage) {
+    return !enchanted && ((group==0 && material==Material::Steel) || (group==2 && material==Material::Iron)) &&
+        plainReplacementAllowed(sourceValue,sourceDamage,value,damage);
+}
 inline bool rebindTemporary(Wear& c,unsigned form,unsigned oldBase,unsigned oldID,unsigned newBase,unsigned newID) {
     if (!c.temporary || c.temporary!=form || c.extraBase!=oldBase || c.extraUID!=oldID || newID>65535) return false;
     c.extraBase=newBase;c.extraUID=static_cast<std::uint16_t>(newID);return true;
