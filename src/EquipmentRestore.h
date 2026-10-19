@@ -190,6 +190,11 @@ class Adapter {
     }
 public:
     void clearTransient() {reequip.clear();}
+    std::vector<RE::FormID> playerTravel(RE::FormID cell,bool entering) const {
+        std::vector<RE::FormID> ready;
+        for (auto& [id,gate]:reequip) {gate.playerTravel(cell,entering);if (entering && gate.ready) ready.push_back(id);}
+        return ready;
+    }
     void initialize() {
         auto* h=RE::TESDataHandler::GetSingleton();
         streetVendors=h->LookupForm<RE::TESFaction>(0x7F6BE,"Skyrim.esm");
@@ -238,9 +243,13 @@ public:
             if (auto* a=o->As<RE::TESObjectARMO>()) {ownedMask|=mask(a);if (e.second && e.second->IsWorn()) {wornMask|=mask(a);if (a->IsClothing()) clothingMask|=mask(a);}}
             if (auto* w=o->As<RE::TESObjectWEAP>()) if (auto kind=weaponKind(w);kind>=0) weaponMask|=1u<<kind;
         }
-        auto& cellGate=reequip[actor->GetFormID()];
         auto* cell=actor->GetParentCell();
         const auto emptyOwned=ownedMask&~wornMask;
+        // Keep travel state only for marked actors with relevant empty slots.
+        const auto relevantEmpty=emptyOwned&(slots[0]|slots[1]|slots[2]|slots[3]);
+        if (!relevantEmpty) reequip.erase(actor->GetFormID());
+        CellReequip noPending;
+        auto& cellGate=relevantEmpty?reequip[actor->GetFormID()]:noPending;
         cellGate.observe(cell?cell->GetFormID():0,emptyOwned);
         if (actor->GetCurrentScene() || actor->IsInCombat() || !actor->IsAIEnabled() || actor->IsInKillMove()) return;
         // Observe missing equipment and service saved deadlines during normal loaded checks.
@@ -280,7 +289,7 @@ public:
             auto occupied=worn(actor);
             // Do not treat deliberate undressing as stolen equipment, even if
             // an old armor deadline has already elapsed.
-            if (!(occupied&slots[i]) && ownsWear(actor,slots[i]) && !(cellGate.ready&slots[i])) continue;
+            if (!(occupied&slots[i]) && ownsWear(actor,slots[i]) && !cellGate.canEquip(i,cell?cell->GetFormID():0)) continue;
             if (!(occupied&slots[i])) {
                 if (clothingSlot ? (equipExisting(actor,slots[i],true) || equipExisting(actor,slots[i],false)) : equipOwnedArmor(actor,source,slots[i])) {c.due=-1;continue;}
                 else if (clothingSlot && !guardUniform(source,guard) && !ownsWear(actor,slots[i]) && !c.temporary) {armOnce(c.due,now,clothingDays(poor || saved.role==Role::Beggar));

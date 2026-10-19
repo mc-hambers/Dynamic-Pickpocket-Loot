@@ -37,6 +37,7 @@ RE::TESBoundObject* vanillaInventoryObject(RE::TESDataHandler* handler,RE::FormI
 }
 class Manager final :
     public RE::BSTEventSink<RE::TESObjectLoadedEvent>,
+    public RE::BSTEventSink<RE::BGSActorCellEvent>,
     public RE::BSTEventSink<RE::TESResetEvent>,
     public RE::BSTEventSink<RE::TESFormDeleteEvent>,
     public RE::BSTEventSink<RE::TESContainerChangedEvent>,
@@ -48,6 +49,7 @@ public:
     std::atomic_bool active{false};
     std::atomic_uint64_t session{0};
     bool validSave = true;
+    bool travelEventsRegistered=false;
 
     void initialize() {
         auto* handler = RE::TESDataHandler::GetSingleton();
@@ -102,6 +104,10 @@ public:
         queuedScanSession = noQueuedScan;
     }
     void enterGame() {
+        if (!travelEventsRegistered) if (auto* player=RE::PlayerCharacter::GetSingleton()) {
+            player->AsBGSActorCellEventSource()->AddEventSink<RE::BGSActorCellEvent>(this);
+            travelEventsRegistered=true;
+        }
         if (!validSave || !gold) {
             logger::error("Distribution disabled: validSave={}, goldResolved={}, poolSize={}",validSave,gold != nullptr,pool.size());
             return;
@@ -471,6 +477,22 @@ public:
         });}
         return RE::BSEventNotifyControl::kContinue;
     }
+    RE::BSEventNotifyControl ProcessEvent(const RE::BGSActorCellEvent* event,RE::BSTEventSource<RE::BGSActorCellEvent>*) override {
+        if (event && active.load()) {
+            auto actor=event->actor.get();
+            if (actor && actor->IsPlayerRef()) {
+                const auto cell=event->cellID;const bool entering=event->flags==RE::BGSActorCellEvent::CellFlag::kEnter;
+                queue([this,cell,entering] {
+                    // Travel events query only NPCs already marked for re-equipping.
+                    for (auto id:restoration.playerTravel(cell,entering)) {
+                        auto* npc=RE::TESForm::LookupByID<RE::Actor>(id);
+                        if (npc && npc->GetParentCell() && npc->GetParentCell()->GetFormID()==cell && npc->Is3DLoaded()) visit(npc);
+                    }
+                });
+            }
+        }
+        return RE::BSEventNotifyControl::kContinue;
+    }
     RE::BSEventNotifyControl ProcessEvent(const RE::TESResetEvent* event,RE::BSTEventSource<RE::TESResetEvent>*) override {
         if (event && event->object) requestReset(event->object->As<RE::Actor>());
         return RE::BSEventNotifyControl::kContinue;
@@ -593,7 +615,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
         spdlog::set_level(spdlog::level::info);
         spdlog::flush_on(spdlog::level::info);
     }
-    logger::info("Dynamic Pickpocket Loot 1.1.4; runtime {}",REL::Module::get().version().string());
+    logger::info("Dynamic Pickpocket Loot 1.1.5; runtime {}",REL::Module::get().version().string());
     const auto version=REL::Module::get().version();
     const std::set<unsigned> aeBuilds{317,318,323,342,353,629,640,659,1130,1170,1179};
     const bool supported=version.major()==1 && ((version.minor()==5 && version.patch()==97) || (version.minor()==6 && aeBuilds.contains(version.patch())) || (version.minor()==7 && (version.patch()==99 || version.patch()==104)));
