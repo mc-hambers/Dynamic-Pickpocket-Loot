@@ -3,7 +3,7 @@
   "dll_architecture": "x64",
   "windows_loader": "passed",
   "skse_exports": "passed",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "gameplay_tested": false,
   "installed_runtime": "1.7.104.0",
   "reset_hook_file_audit": {
@@ -58,8 +58,8 @@
       "lock_constructed_at_offset_24": true
     }
   },
-  "core_behavior_checks": 65795,
-  "dll_sha256": "d3215136c42ed6d2957acdf79ea181bdb1917c508aebce4ddda27b7605ecc6bb",
+  "core_behavior_checks": 65802,
+  "dll_sha256": "591ece44f5ad26dc06ad7b15e9b091470e06454cd0b5b6d8817bf9c690baa0a2",
   "spid_required": false,
   "esp_required": false,
   "ammunition_handling": false,
