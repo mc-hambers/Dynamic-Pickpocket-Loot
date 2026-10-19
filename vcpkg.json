@@ -1,0 +1,5 @@
+{
+  "name": "dynamic-pickpocket-loot",
+  "version-string": "1.1.4",
+  "dependencies": ["spdlog", "rapidcsv", "directxtk", "directxmath"]
+}

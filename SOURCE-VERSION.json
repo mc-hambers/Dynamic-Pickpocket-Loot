@@ -1,7 +1,7 @@
 {
-  "version": "1.1.3",
+  "version": "1.1.4",
   "source_archive": "Dynamic-Pickpocket-Loot-source.zip",
-  "source_sha256": "2cd6b4034871cd266703abe68f345b43d5da0896d038037f713d40a368cc80bb",
+  "source_sha256": "bd8d5fcf2ca17b87561dfcb4ee2c9cdb76e1863a5ffc97538b5bbbae5e248032",
   "precompiled_commonlib": "build/vendor/CommonLibSSE-NG/CommonLibSSE.lib",
   "precompiled_download": "CommonLibSSE.lib.xz",
   "precompiled_sha256": "63940e5e209b2886b8f640478cef06ad73dbb5f908d0ef38724cc42b3d14c7dc"
