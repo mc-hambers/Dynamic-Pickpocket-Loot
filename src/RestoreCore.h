@@ -9,25 +9,26 @@ inline constexpr unsigned weaponKinds=9;
 // A pending slot remembers where undressing was observed. Either actor must
 // leave and return to that cell; merely entering a different cell is insufficient.
 struct CellReequip {
-    std::uint32_t pending=0,ready=0;
-    std::array<std::uint32_t,4> origin{};
-    std::array<bool,4> npcLeft{},playerLeft{};
+    std::uint32_t pending=0,ready=0,observedCell=0;
+    std::array<std::uint32_t,4> origin{},readyAt{},playerLeft{};
+    std::array<bool,4> npcLeft{};
     void observe(std::uint32_t current,std::uint32_t emptyOwned) {
         if (!current) return;
+        observedCell=current;
         for (unsigned i=0;i<slots.size();++i) {
             const auto slot=slots[i];
-            if (!(emptyOwned&slot)) {pending&=~slot;ready&=~slot;origin[i]=0;npcLeft[i]=playerLeft[i]=false;continue;}
+            if (!(emptyOwned&slot)) {pending&=~slot;ready&=~slot;origin[i]=readyAt[i]=playerLeft[i]=0;npcLeft[i]=false;continue;}
             if (!(pending&slot)) {origin[i]=current;pending|=slot;}
             else if (current!=origin[i]) npcLeft[i]=true;
-            else if (npcLeft[i]) ready|=slot;
+            else if (npcLeft[i]) {ready|=slot;readyAt[i]=current;}
         }
     }
-    bool canEquip(unsigned index,std::uint32_t current) const {return index<slots.size() && current && origin[index]==current && (ready&slots[index]);}
+    bool canEquip(unsigned index,std::uint32_t current) const {return index<slots.size() && current && readyAt[index]==current && (ready&slots[index]);}
     void playerTravel(std::uint32_t cell,bool entering) {
         if (!cell) return;
-        for (unsigned i=0;i<slots.size();++i) if ((pending&slots[i]) && origin[i]==cell) {
-            if (!entering) playerLeft[i]=true;
-            else if (playerLeft[i]) ready|=slots[i];
+        for (unsigned i=0;i<slots.size();++i) if ((pending&slots[i]) && observedCell==cell) {
+            if (!entering) playerLeft[i]=cell;
+            else if (playerLeft[i]==cell) {ready|=slots[i];readyAt[i]=cell;}
         }
     }
 };
