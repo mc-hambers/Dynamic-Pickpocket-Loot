@@ -7,8 +7,10 @@
 #include <cmath>
 #include <set>
 #include <string>
+#include <map>
 namespace PL::Restore {
 class Adapter {
+    mutable std::map<RE::FormID,CellReequip> reequip;
     struct Binding {RE::TESBoundObject* object;unsigned kind,group;std::string editor;};
     std::vector<Binding> bindings;
     std::vector<std::pair<RE::BGSKeyword*,Material>> materials;
@@ -187,6 +189,7 @@ class Adapter {
         }return nullptr;
     }
 public:
+    void clearTransient() {reequip.clear();}
     void initialize() {
         auto* h=RE::TESDataHandler::GetSingleton();
         streetVendors=h->LookupForm<RE::TESFaction>(0x7F6BE,"Skyrim.esm");
@@ -223,7 +226,7 @@ public:
         s.initialized=true;
     }
     void run(RE::Actor* actor,PL::State& saved,double now,std::function<bool()> allowed) const {
-        if (!std::isfinite(now) || actor->GetCurrentScene() || actor->IsInCombat() || !allowed()) return;
+        if (!std::isfinite(now) || !allowed()) return;
         auto& s=saved.equipment;if (!s.initialized) baseline(actor,s);
         const bool poor=saved.wealth<=Wealth::Poor;
         const bool guard=saved.role==Role::Guard || actor->IsGuard();
@@ -235,9 +238,15 @@ public:
             if (auto* a=o->As<RE::TESObjectARMO>()) {ownedMask|=mask(a);if (e.second && e.second->IsWorn()) {wornMask|=mask(a);if (a->IsClothing()) clothingMask|=mask(a);}}
             if (auto* w=o->As<RE::TESObjectWEAP>()) if (auto kind=weaponKind(w);kind>=0) weaponMask|=1u<<kind;
         }
+        auto& cellGate=reequip[actor->GetFormID()];
+        auto* cell=actor->GetParentCell();
+        const auto emptyOwned=ownedMask&~wornMask;
+        cellGate.observe(cell?cell->GetFormID():0,emptyOwned);
+        if (actor->GetCurrentScene() || actor->IsInCombat() || !actor->IsAIEnabled() || actor->IsInKillMove()) return;
         // Observe missing equipment and service saved deadlines during normal loaded checks.
         for (unsigned i=0;i<4;++i) if (s.wear[i].source) {
             auto& c=s.wear[i];bool empty=!(wornMask&slots[i]);
+            if (empty && (ownedMask&slots[i])) {c.due=-1;continue;}
             auto* source=RE::TESForm::LookupByID<RE::TESObjectARMO>(c.source);
             if (!source) continue;
             const bool clothingSlot=enabledSlot(i,poor,saved.role==Role::Beggar);
@@ -269,6 +278,9 @@ public:
             if (!clothingSlot && !armorSlot(i,!source->IsClothing())) continue;
             if (c.temporary && !tagged(actor,c)) {c.temporary=0;c.extraBase=0;c.extraUID=0;}
             auto occupied=worn(actor);
+            // Do not treat deliberate undressing as stolen equipment, even if
+            // an old armor deadline has already elapsed.
+            if (!(occupied&slots[i]) && ownsWear(actor,slots[i]) && !(cellGate.ready&slots[i])) continue;
             if (!(occupied&slots[i])) {
                 if (clothingSlot ? (equipExisting(actor,slots[i],true) || equipExisting(actor,slots[i],false)) : equipOwnedArmor(actor,source,slots[i])) {c.due=-1;continue;}
                 else if (clothingSlot && !guardUniform(source,guard) && !ownsWear(actor,slots[i]) && !c.temporary) {armOnce(c.due,now,clothingDays(poor || saved.role==Role::Beggar));
@@ -313,6 +325,7 @@ public:
                 }
             }
         }
+        cellGate.observe(cell?cell->GetFormID():0,ownedMask&~worn(actor));
         for (unsigned kind=0;kind<weaponKinds && allowed();++kind) {
             auto& c=s.weapons[kind];auto* source=RE::TESForm::LookupByID<RE::TESObjectWEAP>(c.source);
             if (!weapons || !source || held(actor,kind)) {c.due=-1;continue;}

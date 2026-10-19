@@ -89,6 +89,7 @@ public:
         saved.seed = static_cast<std::uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
     }
     void clear() {
+        restoration.clearTransient();
         active = false;
         ++session;
         saved = {};
@@ -370,7 +371,7 @@ public:
         if (!alreadyPreparing) preparingActors.insert(id);
         auto preparation=resetInbox.prepare(id);
         flushRestoreChanges();
-        restoration.run(actor,state,gameDays(),[&,this] {return active.load() && session.load()==generation && state.cycle==cycle && !resetInbox.contains(id) && !actor->IsDead() && !following(actor);});
+        restoration.run(actor,state,gameDays(),[&,this] {return active.load() && session.load()==generation && state.cycle==cycle && !resetInbox.contains(id) && !actor->IsDead() && !following(actor) && !actor->GetCurrentScene() && !actor->IsInCombat() && actor->IsAIEnabled() && !actor->IsInKillMove();});
         flushRestoreChanges();
         if (!alreadyPreparing) preparingActors.erase(id);
     }
@@ -592,7 +593,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
         spdlog::set_level(spdlog::level::info);
         spdlog::flush_on(spdlog::level::info);
     }
-    logger::info("Dynamic Pickpocket Loot 1.1.3; runtime {}",REL::Module::get().version().string());
+    logger::info("Dynamic Pickpocket Loot 1.1.4; runtime {}",REL::Module::get().version().string());
     const auto version=REL::Module::get().version();
     const std::set<unsigned> aeBuilds{317,318,323,342,353,629,640,659,1130,1170,1179};
     const bool supported=version.major()==1 && ((version.minor()==5 && version.patch()==97) || (version.minor()==6 && aeBuilds.contains(version.patch())) || (version.minor()==7 && (version.patch()==99 || version.patch()==104)));

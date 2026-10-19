@@ -6,6 +6,17 @@
 namespace PL::Restore {
 inline constexpr std::array<std::uint32_t,4> slots{1u<<2,1u<<7,1u<<3,(1u<<0)|(1u<<1)}; // body, feet, hands, head/hair
 inline constexpr unsigned weaponKinds=9;
+// Carried equipment is not missing. Wait for this actor to change cells
+// after observing an empty slot before taking ownership of re-equipping it.
+struct CellReequip {
+    std::uint32_t cell=0,pending=0,ready=0;
+    void observe(std::uint32_t current,std::uint32_t emptyOwned) {
+        if (!current) return;
+        if (cell && cell!=current) ready|=pending;
+        pending&=emptyOwned;ready&=emptyOwned;
+        pending|=emptyOwned;cell=current;
+    }
+};
 enum class Material : std::uint8_t { Other,Iron,Steel,Elven,Glass,Ebony,Daedric,Dragonbone,Dwarven };
 struct Wear {
     std::uint32_t source=0,temporary=0,extraBase=0;
