@@ -1,4 +1,6 @@
 #include "Core.h"
+#include "LootCycleAPI.h"
+#include "JewelryEquip.h"
 #include "InventoryAccounting.h"
 #include "FormResolution.h"
 #include "DistributionLifecycle.h"
@@ -46,12 +48,28 @@ class Manager final :
 public:
     static Manager& get() { static Manager instance; return instance; }
     Save::Data saved;
+    std::set<std::uint32_t> jewelryChecked;
+    bool equipJewelry=false;
+    void loadJewelrySetting(){
+        const auto path=std::filesystem::path(REL::Module::get().filePath().data()).parent_path()/L"Data/SKSE/Plugins/DynamicPickpocketLoot_Settings.ini";
+        std::error_code ec;std::filesystem::create_directories(path.parent_path(),ec);
+        const auto file=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(file!=INVALID_HANDLE_VALUE){constexpr char text[]="; Dynamic Pickpocket Loot settings. Restart Skyrim after editing.\r\n; Equip existing rings/amulets once per NPC, until an actual inventory reset.\r\n[Settings]\r\nEquipJewelry=0\r\n";DWORD n=0;WriteFile(file,text,sizeof(text)-1,&n,nullptr);CloseHandle(file);}
+        equipJewelry=GetPrivateProfileIntW(L"Settings",L"EquipJewelry",0,path.c_str())!=0;
+        logger::info("Native jewelry equipping enabled: {}",equipJewelry);
+    }
+    void checkJewelry(RE::Actor* actor){
+        if(!equipJewelry||!actor||jewelryChecked.contains(actor->GetFormID()))return;
+        const auto id=actor->GetFormID();jewelryChecked.insert(id); // before callbacks
+        if(!equipInventoryJewelry(actor))jewelryChecked.erase(id);
+    }
     std::atomic_bool active{false};
     std::atomic_uint64_t session{0};
     bool validSave = true;
     bool travelEventsRegistered=false;
 
     void initialize() {
+        loadJewelrySetting();
         auto* handler = RE::TESDataHandler::GetSingleton();
         for (const auto& r : Vanilla::rules) {
             if (auto* form = handler->LookupForm(r.form,"Skyrim.esm")) rules.push_back({form,r.role,r.priority,r.magical,r.faction,Vanilla::commonEnemySource(r)});
@@ -94,7 +112,7 @@ public:
         restoration.clearTransient();
         active = false;
         ++session;
-        saved = {};
+        saved = {};jewelryChecked.clear();
         validSave = true;
         newSeed();
         resetInbox.clear();
@@ -288,7 +306,7 @@ public:
         if (preparingActors.contains(id) || resetInbox.contains(id)) return;
         flushPendingVictimTimers();
         auto& state=stateFor(actor);
-        if (state.generated) restoreEquipment(actor,state);
+        if (state.generated) {restoreEquipment(actor,state);checkJewelry(actor);}
         const auto now=gameDays();
         if (victimCooldownBlocks(state,now)) return;
         if (consumeVictimTimer(state,now) && diagnosticTimers++<20)
@@ -338,6 +356,7 @@ public:
         flushRestoreChanges();
         working.equipment=saved.actors.at(id).equipment;
         saved.actors[id]=working;
+        notifyCycle(id,working.cycle);
         int goldAdded=0;
         std::size_t stacksAdded=0;
         bool suppliesAdded=false;
@@ -368,6 +387,7 @@ public:
             if (deficit>0 && session.load()==generation && active.load() && !resetInbox.contains(id)) { actor->AddObjectToContainer(gold,nullptr,deficit,nullptr); goldAdded+=deficit; }
         }
         Plan applied=plan;applied.gold=goldAdded;applied.items.resize(stacksAdded);
+        checkJewelry(actor);
         logGeneration(actor,snapshot,applied);
         if (auto found=saved.actors.find(id);found!=saved.actors.end() && found->second.generated) restoreEquipment(actor,found->second);
     }
@@ -413,7 +433,7 @@ public:
     void flushPendingResetState() {
         for (auto id:resetInbox.drain()) {
             auto found=saved.actors.find(id);
-            if (found!=saved.actors.end()) resetCycle(found->second);
+            if (found!=saved.actors.end()) {resetCycle(found->second);jewelryChecked.erase(id);notifyCycle(id,found->second.cycle);}
             // No record means first generation is already naturally pending.
         }
     }
@@ -439,6 +459,7 @@ public:
         }
         for (auto& handle : actors) if (auto actor = handle.get()) visit(actor.get());
     }
+    void notifyCycle(std::uint32_t id,std::uint32_t cycle) {LootCycleAPI::Event e{id,cycle};SKSE::GetMessagingInterface()->Dispatch(LootCycleAPI::Changed,&e,sizeof(e),nullptr);}
     void requestReset(RE::Actor* actor) {
         if (!active.load() || !human(actor)) return;
         auto id = actor->GetFormID();
@@ -449,7 +470,7 @@ public:
             if (!human(actor) || !actor->GetActorBase()) return;
             flushPendingVictimTimers();
             auto& state = stateFor(actor);
-            resetCycle(state);
+            resetCycle(state);jewelryChecked.erase(id);notifyCycle(id,state.cycle);
             logger::debug("Actor {:08X} reset cycle {}",id,state.cycle);
             visit(actor);
         });
@@ -556,6 +577,7 @@ void save(SKSE::SerializationInterface* api) {
     manager.flushPendingVictimTimers();
     manager.flushPendingResetState();
     manager.flushRestoreChanges();
+    if(api->OpenRecord(0x4A435931,1)){auto count=std::uint32_t(manager.jewelryChecked.size());api->WriteRecordData(&count,4);for(auto id:manager.jewelryChecked)api->WriteRecordData(&id,4);}
     auto bytes=Save::encode(manager.saved);
     if (!api->OpenRecord(stateRecord,Save::schema) || !api->WriteRecordData(bytes.data(),static_cast<std::uint32_t>(bytes.size()))) logger::error("Failed to serialize loot state");
 }
@@ -565,6 +587,7 @@ void load(SKSE::SerializationInterface* api) {
     std::uint32_t type,version,length;
     bool seen=false;
     while (api->GetNextRecordInfo(type,version,length)) {
+        if(type==0x4A435931&&version==1){std::uint32_t count=0;if(api->ReadRecordData(&count,4)!=4||count>100000||length!=4+count*4){manager.equipJewelry=false;continue;}for(unsigned i=0;i<count;++i){std::uint32_t id=0,resolved=0;if(api->ReadRecordData(&id,4)!=4){manager.equipJewelry=false;break;}if(api->ResolveFormID(id,resolved))manager.jewelryChecked.insert(resolved);}continue;}
         if (type!=stateRecord) continue;
         if (seen || length>64*1024*1024) { manager.validSave=false; continue; }
         seen=true;
@@ -615,7 +638,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
         spdlog::set_level(spdlog::level::info);
         spdlog::flush_on(spdlog::level::info);
     }
-    logger::info("Dynamic Pickpocket Loot 1.1.5; runtime {}",REL::Module::get().version().string());
+    logger::info("Dynamic Pickpocket Loot 1.2.0; runtime {}",REL::Module::get().version().string());
     const auto version=REL::Module::get().version();
     const std::set<unsigned> aeBuilds{317,318,323,342,353,629,640,659,1130,1170,1179};
     const bool supported=version.major()==1 && ((version.minor()==5 && version.patch()==97) || (version.minor()==6 && aeBuilds.contains(version.patch())) || (version.minor()==7 && (version.patch()==99 || version.patch()==104)));
@@ -627,3 +650,8 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     return SKSE::GetMessagingInterface()->RegisterListener(message);
 }
 
+
+extern "C" __declspec(dllexport) const LootCycleAPI::V1* PickpocketingLoot_RequestCycleAPI(std::uint32_t version) {
+ static const LootCycleAPI::V1 api{1,[](std::uint32_t id,std::uint32_t* cycle){auto& m=Manager::get();if(!m.active||!cycle)return false;auto it=m.saved.actors.find(id);if(it==m.saved.actors.end())return false;*cycle=it->second.cycle;return true;}};
+ return version==1?&api:nullptr;
+}

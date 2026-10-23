@@ -1,8 +1,12 @@
 {
-  "version": "1.1.5",
+  "version": "1.2.0",
   "source_archive": "Dynamic-Pickpocket-Loot-source.zip",
-  "source_sha256": "276e440adf447c94306208401e1d046aeb60a6631c19527a96e4dac69950e819",
+  "source_sha256": "da20a9149fb4d61341dbe933bbcca77caf0e7938eefbb4a5f6863a7683f6ee93",
   "precompiled_commonlib": "build/vendor/CommonLibSSE-NG/CommonLibSSE.lib",
   "precompiled_download": "CommonLibSSE.lib.xz",
-  "precompiled_sha256": "63940e5e209b2886b8f640478cef06ad73dbb5f908d0ef38724cc42b3d14c7dc"
+  "precompiled_sha256": "63940e5e209b2886b8f640478cef06ad73dbb5f908d0ef38724cc42b3d14c7dc",
+  "display_name": "Dynamic Pickpocket Loot",
+  "runtime_archive": "Dynamic-Pickpocket-Loot-v1.2.0.zip",
+  "runtime_sha256": "d810099e104f7d0e54aee13279d1a0d2e913dca4055ef71c47ec180fa593d7c9",
+  "gameplay_tested": false
 }

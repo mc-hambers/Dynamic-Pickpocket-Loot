@@ -3,7 +3,7 @@
   "dll_architecture": "x64",
   "windows_loader": "passed",
   "skse_exports": "passed",
-  "version": "1.1.5",
+  "version": "1.2.0",
   "gameplay_tested": false,
   "installed_runtime": "1.7.104.0",
   "reset_hook_file_audit": {
@@ -59,7 +59,7 @@
     }
   },
   "core_behavior_checks": 65802,
-  "dll_sha256": "591ece44f5ad26dc06ad7b15e9b091470e06454cd0b5b6d8817bf9c690baa0a2",
+  "dll_sha256": "6a7a5885008f9ece9ae84c35ec92174dd6b2c4a839916f2be298e91066a1e87a",
   "spid_required": false,
   "esp_required": false,
   "ammunition_handling": false,
@@ -71,5 +71,9 @@
   "guard_uniform_restoration": true,
   "guard_armor_game_days": 0.5,
   "editable_loot_pools": true,
-  "victim_cooldown_game_days": 3
+  "victim_cooldown_game_days": 3,
+  "native_jewelry_equipping": true,
+  "jewelry_saved_per_inventory_reset": true,
+  "loot_cycle_api_version": 1,
+  "jewelry_gameplay_tested": false
 }
