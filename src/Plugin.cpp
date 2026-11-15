@@ -1,3 +1,4 @@
+#include "ActorWorkQueue.h"
 #include "Core.h"
 #include "LootCycleAPI.h"
 #include "JewelryEquip.h"
@@ -49,13 +50,13 @@ public:
     static Manager& get() { static Manager instance; return instance; }
     Save::Data saved;
     std::set<std::uint32_t> jewelryChecked;
-    bool equipJewelry=false;
+    bool equipJewelry=true;
     void loadJewelrySetting(){
         const auto path=std::filesystem::path(REL::Module::get().filePath().data()).parent_path()/L"Data/SKSE/Plugins/DynamicPickpocketLoot_Settings.ini";
         std::error_code ec;std::filesystem::create_directories(path.parent_path(),ec);
         const auto file=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
-        if(file!=INVALID_HANDLE_VALUE){constexpr char text[]="; Dynamic Pickpocket Loot settings. Restart Skyrim after editing.\r\n; Equip existing rings/amulets once per NPC, until an actual inventory reset.\r\n[Settings]\r\nEquipJewelry=0\r\n";DWORD n=0;WriteFile(file,text,sizeof(text)-1,&n,nullptr);CloseHandle(file);}
-        equipJewelry=GetPrivateProfileIntW(L"Settings",L"EquipJewelry",0,path.c_str())!=0;
+        if(file!=INVALID_HANDLE_VALUE){constexpr char text[]="; Dynamic Pickpocket Loot settings. Restart Skyrim after editing.\r\n; Equip existing rings/amulets once per NPC, until an actual inventory reset.\r\n[Settings]\r\nEquipJewelry=1\r\n";DWORD n=0;WriteFile(file,text,sizeof(text)-1,&n,nullptr);CloseHandle(file);}
+        equipJewelry=GetPrivateProfileIntW(L"Settings",L"EquipJewelry",1,path.c_str())!=0;
         logger::info("Native jewelry equipping enabled: {}",equipJewelry);
     }
     void checkJewelry(RE::Actor* actor){
@@ -99,7 +100,7 @@ public:
         logger::info("Loaded {} active pool items, {} role rules, {} races; gold resolved={}",pool.size(),rules.size(),races.size(),gold != nullptr);
         worker = std::jthread([this](std::stop_token stop) {
             while (!stop.stop_requested()) {
-                for (int i=0;i<20 && !stop.stop_requested();++i) std::this_thread::sleep_for(250ms);
+                std::this_thread::sleep_for(33ms);
                 if (stop.stop_requested()) return;
                 if (active.load()) queueScan();
             }
@@ -109,6 +110,7 @@ public:
         saved.seed = static_cast<std::uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
     }
     void clear() {
+        actorWork.clear();trackedActors.clear();previousContext.clear();bootstrapPending=true;nextDiscovery={};
         restoration.clearTransient();
         active = false;
         ++session;
@@ -122,6 +124,7 @@ public:
         queuedScanSession = noQueuedScan;
     }
     void enterGame() {
+        actorWork.clear();trackedActors.clear();previousContext.clear();bootstrapPending=true;nextDiscovery={};
         if (!travelEventsRegistered) if (auto* player=RE::PlayerCharacter::GetSingleton()) {
             player->AsBGSActorCellEventSource()->AddEventSink<RE::BGSActorCellEvent>(this);
             travelEventsRegistered=true;
@@ -138,7 +141,7 @@ public:
         diagnosticScanLogged = false;
         logger::info("Distribution enabled; preserving loot state for {} actors",saved.actors.size());
         logger::info("Victim refresh enabled: {} game days after first successful theft; no inventory reset",victimCooldownDays);
-        queueScan();
+        discoverLoadedActors();queueScan();
     }
     template<class F> void queue(F task) {
         auto generation = session.load();
@@ -437,6 +440,21 @@ public:
             // No record means first generation is already naturally pending.
         }
     }
+    void discoverLoadedActors() {
+        if (!bootstrapPending) return;
+        bootstrapPending=false;
+        unsigned count=0;
+        const auto start=std::chrono::steady_clock::now();
+        if (auto* processes=RE::ProcessLists::GetSingleton()) {
+            processes->ForAllActors([&](RE::Actor* actor) {
+                if (actor) {trackedActors.insert(actor->GetFormID());actorWork.add(actor->GetFormID());++count;}
+                return RE::BSContainer::ForEachResult::kContinue;
+            });
+        }
+        logger::info("Save-load discovery queued {} actor IDs in {:.3f} ms; Loading Menu open={}",count,
+            std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count(),
+            RE::UI::GetSingleton()->IsMenuOpen(RE::LoadingMenu::MENU_NAME));
+    }
     void queueScan() {
         const auto generation=session.load();
         if (queuedScanSession.exchange(generation)==generation) return;
@@ -448,16 +466,45 @@ public:
     }
     void scan() {
         if (!validSave || RE::UI::GetSingleton()->GameIsPaused()) return;
-        std::vector<RE::ActorHandle> actors;
-        RE::ProcessLists::GetSingleton()->ForAllActors([&](RE::Actor* actor) {
-            if (actor) actors.push_back(actor->GetHandle());
-            return RE::BSContainer::ForEachResult::kContinue;
-        });
-        if (!diagnosticScanLogged && !actors.empty()) {
-            logger::info("Initial live scan found {} loaded actor handles",actors.size());
-            diagnosticScanLogged = true;
+        const auto start=std::chrono::steady_clock::now();
+        if (start>=nextDiscovery) {
+            nextDiscovery=start+5s;
+            const auto* calendar=RE::Calendar::GetSingleton();
+            const double now=calendar ? calendar->GetDaysPassed() : -1;
+            for (auto it=trackedActors.begin();it!=trackedActors.end();) {
+                const auto id=*it;
+                auto* actor=RE::TESForm::LookupByID<RE::Actor>(id);
+                if (!actor || actor->IsDeleted() || !actor->Is3DLoaded()) {
+                    previousContext.erase(id);it=trackedActors.erase(it);continue;
+                }
+                ++it;
+                if (!human(actor)) continue;
+                const unsigned flags=following(actor);
+                const bool changed=!previousContext.contains(id) || previousContext[id]!=flags;
+                previousContext[id]=flags;
+                const auto found=saved.actors.find(id);
+                bool due=found==saved.actors.end();
+                if (found!=saved.actors.end()) {
+                    const auto& state=found->second;
+                    due=!state.generated || !state.equipment.initialized
+                        || (state.pickpocketDue>=0 && now>=state.pickpocketDue);
+                    for (const auto& wear:state.equipment.wear)
+                        due=due || (wear.due>=0 && now>=wear.due) || (wear.armorDue>=0 && now>=wear.armorDue);
+                    for (const auto& weapon:state.equipment.weapons)
+                        due=due || (weapon.due>=0 && now>=weapon.due);
+                }
+                if (changed || due) actorWork.add(id);
+            }
         }
-        for (auto& handle : actors) if (auto actor = handle.get()) visit(actor.get());
+        const auto generation=session.load();
+        unsigned processed=0;
+        while (processed<4 && !actorWork.empty() && std::chrono::steady_clock::now()-start<2ms) {
+            if (!active.load() || session.load()!=generation) break;
+            const auto id=actorWork.pop();
+            if (RE::TESForm::LookupByID<RE::Actor>(id)) trackedActors.insert(id);
+            visit(RE::TESForm::LookupByID<RE::Actor>(id));
+            ++processed;
+        }
     }
     void notifyCycle(std::uint32_t id,std::uint32_t cycle) {LootCycleAPI::Event e{id,cycle};SKSE::GetMessagingInterface()->Dispatch(LootCycleAPI::Changed,&e,sizeof(e),nullptr);}
     void requestReset(RE::Actor* actor) {
@@ -472,10 +519,19 @@ public:
             auto& state = stateFor(actor);
             resetCycle(state);jewelryChecked.erase(id);notifyCycle(id,state.cycle);
             logger::debug("Actor {:08X} reset cycle {}",id,state.cycle);
-            visit(actor);
+            actorWork.add(id);
         });
     }
     RE::BSEventNotifyControl ProcessEvent(const RE::TESContainerChangedEvent* event,RE::BSTEventSource<RE::TESContainerChangedEvent>*) override {
+        if (event && active.load()) {
+            const auto oldID=event->oldContainer,newID=event->newContainer;
+            queue([this,oldID,newID] {
+                for (const auto id:{oldID,newID}) if (id && id!=0x14) {
+                    auto* actor=RE::TESForm::LookupByID<RE::Actor>(id);
+                    if (human(actor)) {trackedActors.insert(id);actorWork.add(id);}
+                }
+            });
+        }
         if (event && active.load() && event->newContainer==0x14 && event->itemCount>0) {
             auto* victim=pickpocketTarget();
             if (victim && isVictimTransfer(event->oldContainer,event->newContainer,event->itemCount,victim->GetFormID(),true)) requestVictimTimer(victim);
@@ -493,8 +549,10 @@ public:
         return RE::BSEventNotifyControl::kContinue;
     }
     RE::BSEventNotifyControl ProcessEvent(const RE::TESObjectLoadedEvent* event,RE::BSTEventSource<RE::TESObjectLoadedEvent>*) override {
-        if (event && event->loaded && active.load()) {const auto id=event->formID;queue([this,id] {
-            auto* actor=RE::TESForm::LookupByID<RE::Actor>(id);if (human(actor)) visit(actor);
+        if (event && active.load()) {const auto id=event->formID;const bool loaded=event->loaded;queue([this,id,loaded] {
+            if (!loaded) {trackedActors.erase(id);previousContext.erase(id);return;}
+            if (RE::TESForm::LookupByID<RE::Actor>(id)) trackedActors.insert(id);
+            auto* actor=RE::TESForm::LookupByID<RE::Actor>(id);if (human(actor)) actorWork.add(id);
         });}
         return RE::BSEventNotifyControl::kContinue;
     }
@@ -507,7 +565,7 @@ public:
                     // Travel events query only NPCs already marked for re-equipping.
                     for (auto id:restoration.playerTravel(cell,entering)) {
                         auto* npc=RE::TESForm::LookupByID<RE::Actor>(id);
-                        if (npc && npc->GetParentCell() && npc->GetParentCell()->GetFormID()==cell && npc->Is3DLoaded()) visit(npc);
+                        if (npc && npc->GetParentCell() && npc->GetParentCell()->GetFormID()==cell && npc->Is3DLoaded()) actorWork.add(npc->GetFormID());
                     }
                 });
             }
@@ -530,6 +588,11 @@ public:
         return RE::BSEventNotifyControl::kContinue;
     }
 private:
+    NL::ActorWorkQueue actorWork;
+    std::set<std::uint32_t> trackedActors;
+    std::unordered_map<std::uint32_t,unsigned> previousContext;
+    bool bootstrapPending=true;
+    std::chrono::steady_clock::time_point nextDiscovery{};
     Restore::Adapter restoration;
     std::mutex restoreMutex;
     std::vector<RestoreIDChange> restoreChanges;
@@ -636,9 +699,9 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
         auto log=std::make_shared<spdlog::logger>("PickpocketingLoot",std::move(sink));
         spdlog::set_default_logger(std::move(log));
         spdlog::set_level(spdlog::level::info);
-        spdlog::flush_on(spdlog::level::info);
+        spdlog::flush_on(spdlog::level::warn);
     }
-    logger::info("Dynamic Pickpocket Loot 1.2.0; runtime {}",REL::Module::get().version().string());
+    logger::info("Dynamic Pickpocket Loot 1.2.3; runtime {}",REL::Module::get().version().string());
     const auto version=REL::Module::get().version();
     const std::set<unsigned> aeBuilds{317,318,323,342,353,629,640,659,1130,1170,1179};
     const bool supported=version.major()==1 && ((version.minor()==5 && version.patch()==97) || (version.minor()==6 && aeBuilds.contains(version.patch())) || (version.minor()==7 && (version.patch()==99 || version.patch()==104)));

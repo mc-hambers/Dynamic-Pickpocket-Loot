@@ -3,7 +3,7 @@
   "dll_architecture": "x64",
   "windows_loader": "passed",
   "skse_exports": "passed",
-  "version": "1.2.0",
+  "version": "1.2.3",
   "gameplay_tested": false,
   "installed_runtime": "1.7.104.0",
   "reset_hook_file_audit": {
@@ -58,12 +58,12 @@
       "lock_constructed_at_offset_24": true
     }
   },
-  "core_behavior_checks": 65802,
-  "dll_sha256": "6a7a5885008f9ece9ae84c35ec92174dd6b2c4a839916f2be298e91066a1e87a",
+  "core_behavior_checks": 65806,
+  "dll_sha256": "e3269956d92831c4f55231b8c9937b15799a2470ad2dd94ae05d7374d389e6f2",
   "spid_required": false,
   "esp_required": false,
   "ammunition_handling": false,
-  "save_schema": 4,
+  "save_schema": 2,
   "clothing_restoration": true,
   "weapon_restoration": true,
   "armor_accessory_restoration": true,
@@ -73,7 +73,11 @@
   "editable_loot_pools": true,
   "victim_cooldown_game_days": 3,
   "native_jewelry_equipping": true,
+  "jewelry_default_enabled": true,
   "jewelry_saved_per_inventory_reset": true,
   "loot_cycle_api_version": 1,
-  "jewelry_gameplay_tested": false
+  "jewelry_gameplay_tested": false,
+  "gameplay_performance_verified": false,
+  "discovery_at_save_load": true,
+  "event_driven_actor_tracking": true
 }

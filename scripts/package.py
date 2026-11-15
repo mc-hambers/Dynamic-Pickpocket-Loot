@@ -8,7 +8,7 @@ import zipfile
 from pathlib import Path
 
 root=Path(__file__).resolve().parents[1]
-version='1.2.0'
+version='1.2.3'
 release=root/'releases'
 release.mkdir(exist_ok=True)
 dll=root/'build/package/SKSE/Plugins/PickpocketingLoot.dll'
@@ -17,7 +17,7 @@ test=subprocess.run([str(root/'build/CoreTests.exe'),str(root/'config/DynamicPic
 checks=int(re.search(r'Passed (\d+) behavior checks',test.stdout)[1])
 sha=lambda data:hashlib.sha256(data).hexdigest()
 validation=json.loads((root/'research/binary-validation.json').read_text(encoding='utf-8'))
-validation.update(version=version,core_behavior_checks=checks,dll_sha256=sha(dll.read_bytes()),spid_required=False,esp_required=False,ammunition_handling=False,save_schema=4,clothing_restoration=True,weapon_restoration=True,armor_accessory_restoration=True,multiple_native_weapon_types=True,guard_uniform_restoration=True,guard_armor_game_days=0.5,editable_loot_pools=True,victim_cooldown_game_days=3,native_jewelry_equipping=True,jewelry_saved_per_inventory_reset=True,loot_cycle_api_version=1,jewelry_gameplay_tested=False)
+validation.update(version=version,core_behavior_checks=checks,dll_sha256=sha(dll.read_bytes()),spid_required=False,esp_required=False,ammunition_handling=False,save_schema=4,clothing_restoration=True,weapon_restoration=True,armor_accessory_restoration=True,multiple_native_weapon_types=True,guard_uniform_restoration=True,guard_armor_game_days=0.5,editable_loot_pools=True,victim_cooldown_game_days=3,native_jewelry_equipping=True,jewelry_default_enabled=True,jewelry_saved_per_inventory_reset=True,loot_cycle_api_version=1,jewelry_gameplay_tested=False)
 (root/'validation-results.json').write_text(json.dumps(validation,indent=2)+'\n',encoding='utf-8')
 
 notices=root/'third-party'

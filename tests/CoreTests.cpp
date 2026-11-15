@@ -1,3 +1,4 @@
+#include "ActorWorkQueue.h"
 #include "Core.h"
 #include "Serialization.h"
 #include "InventoryAccounting.h"
@@ -46,6 +47,15 @@ void configFixture(const char* path) {
     }
 }
 void tests() { using namespace PL;
+    NL::ActorWorkQueue work;
+    work.add(0);work.add(10);work.add(10);work.add(20);
+    check(work.pop()==10,"Actor queue deduplicates repeated events");
+    check(work.pop()==20 && work.empty(),"Actor queue preserves FIFO order");
+    work.add(30);work.clear();
+    check(work.empty() && work.pop()==0,"Actor queue clears on reload");
+    work.add(10);
+    check(work.pop()==10,"Actor queue can accept an actor again after processing");
+
     {
         InventoryItemFacts facts;
         check(!needsPocketValue(facts),"Weapons and unclassified junk do not request pocket valuation");
