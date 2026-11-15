@@ -9,6 +9,8 @@
 #include "VanillaData.h"
 #include "EnemyBalance.h"
 #include "LootConfig.h"
+#include "LootConfigFile.h"
+#include "DefaultLootConfig.h"
 #include "VictimTimer.h"
 #include "EquipmentRestore.h"
 #include <filesystem>
@@ -222,6 +224,9 @@ public:
     void loadPools(RE::TESDataHandler* handler) {
         std::vector<LootConfigEntry> configured;
         const auto path=std::filesystem::path(REL::Module::get().filePath().data()).parent_path()/"Data/SKSE/Plugins/DynamicPickpocketLoot.ini";
+        const auto creation=ensureDefaultConfig(path,DefaultLootConfig);
+        if(creation.status==DefaultConfigStatus::Created)logger::info("Created missing editable loot config: {}",path.string());
+        else if(creation.status==DefaultConfigStatus::Failed)logger::warn("Could not create missing loot config at {} (Windows error {}); existing files are never replaced",path.string(),creation.error);
         std::ifstream input(path,std::ios::binary);
         bool useDefaults=true;
         if (input) {
@@ -238,7 +243,7 @@ public:
             }
         }
         if (useDefaults) {
-            logger::warn("Loot INI missing, unreadable, or over 1 MiB; using built-in vanilla pools");
+            logger::warn("Loot INI at {} is unavailable, unreadable, or over 1 MiB; using built-in vanilla pools",path.string());
             for (const auto& p:Vanilla::pools) configured.push_back({"Skyrim.esm",p.form,p.category,p.minimum,p.childSafe,p.prisonerSafe,0});
         } else logger::info("Loading loot pools from {} ({} valid lines)",path.string(),configured.size());
         for (const auto& entry:configured) {
@@ -701,7 +706,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
         spdlog::set_level(spdlog::level::info);
         spdlog::flush_on(spdlog::level::warn);
     }
-    logger::info("Dynamic Pickpocket Loot 1.2.3; runtime {}",REL::Module::get().version().string());
+    logger::info("Dynamic Pickpocket Loot 1.2.4; runtime {}",REL::Module::get().version().string());
     const auto version=REL::Module::get().version();
     const std::set<unsigned> aeBuilds{317,318,323,342,353,629,640,659,1130,1170,1179};
     const bool supported=version.major()==1 && ((version.minor()==5 && version.patch()==97) || (version.minor()==6 && aeBuilds.contains(version.patch())) || (version.minor()==7 && (version.patch()==99 || version.patch()==104)));

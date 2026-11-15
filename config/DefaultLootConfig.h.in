@@ -1,0 +1,2 @@
+#pragma once
+namespace PL { inline constexpr char DefaultLootConfig[]=R"DPL_DEFAULT(@DPL_DEFAULT_LOOT_TEXT@)DPL_DEFAULT"; }

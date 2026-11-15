@@ -8,7 +8,7 @@ import zipfile
 from pathlib import Path
 
 root=Path(__file__).resolve().parents[1]
-version='1.2.3'
+version='1.2.4'
 release=root/'releases'
 release.mkdir(exist_ok=True)
 dll=root/'build/package/SKSE/Plugins/PickpocketingLoot.dll'

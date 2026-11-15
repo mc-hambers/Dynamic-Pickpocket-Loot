@@ -1,83 +1,16 @@
 {
-  "plugin_name": "Dynamic Pickpocket Loot",
-  "dll_architecture": "x64",
-  "windows_loader": "passed",
-  "skse_exports": "passed",
-  "version": "1.2.3",
   "gameplay_tested": false,
-  "installed_runtime": "1.7.104.0",
-  "reset_hook_file_audit": {
-    "Actor": {
-      "address_library_id": 207511,
-      "vtable_rva": "0x191b548",
-      "slot": "0x8A",
-      "reset_target_rva": "0x678950"
-    },
-    "Character": {
-      "address_library_id": 207886,
-      "vtable_rva": "0x1923258",
-      "slot": "0x8A",
-      "reset_target_rva": "0x678950"
-    }
+  "measured_hitch_improvement": false,
+  "save_load_functions_unchanged": true,
+  "PCR": {
+    "version": "1.1.3",
+    "behavior_checks": 140698,
+    "hook_fixture_checks": 91,
+    "preview_cache_checks": 22
   },
-  "victim_event_file_audit": {
-    "items_pickpocketed_source_rva": "0x915710",
-    "globals": {
-      "container_mode": {
-        "address_library_id": 405937,
-        "rva": "0x32560b8"
-      },
-      "container_target": {
-        "address_library_id": 405962,
-        "rva": "0x3256180"
-      }
-    }
-  },
-  "equipment_file_audit": {
-    "equip_object": {
-      "address_library_id": 38894,
-      "rva": "0x6dc310"
-    },
-    "extra_data_constructor": {
-      "address_library_id": 11583,
-      "rva": "0x157420"
-    },
-    "inventory_next_unique_id": {
-      "address_library_id": 16148,
-      "rva": "0x23f540"
-    },
-    "inventory_set_unique_id": {
-      "address_library_id": 16147,
-      "rva": "0x23f390"
-    },
-    "extra_data_layout": {
-      "native_required_bytes": 32,
-      "previous_combined_facade_allocation_bytes": 12,
-      "new_allocation_minimum_bytes": 32,
-      "constructor_writes_offset_16": true,
-      "lock_constructed_at_offset_24": true
-    }
-  },
-  "core_behavior_checks": 65806,
-  "dll_sha256": "e3269956d92831c4f55231b8c9937b15799a2470ad2dd94ae05d7374d389e6f2",
-  "spid_required": false,
-  "esp_required": false,
-  "ammunition_handling": false,
-  "save_schema": 2,
-  "clothing_restoration": true,
-  "weapon_restoration": true,
-  "armor_accessory_restoration": true,
-  "multiple_native_weapon_types": true,
-  "guard_uniform_restoration": true,
-  "guard_armor_game_days": 0.5,
-  "editable_loot_pools": true,
-  "victim_cooldown_game_days": 3,
-  "native_jewelry_equipping": true,
-  "jewelry_default_enabled": true,
-  "jewelry_saved_per_inventory_reset": true,
-  "loot_cycle_api_version": 1,
-  "jewelry_gameplay_tested": false,
-  "gameplay_performance_verified": false,
-  "discovery_at_save_load": true,
-  "event_driven_actor_tracking": true
+  "DPL": {
+    "version": "1.2.4",
+    "behavior_checks": 65806,
+    "config_file_checks": 104
+  }
 }
